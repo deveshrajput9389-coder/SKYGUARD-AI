@@ -30,7 +30,7 @@ st.set_page_config(
 
 st_autorefresh(
     interval=2000,
-    key="skyguard_auto_refresh"
+    key="skyguard_refresh"
 )
 
 
@@ -63,12 +63,12 @@ def add_event(message, event_type="INFO"):
     timestamp = pd.Timestamp.now().strftime("%H:%M:%S")
 
     st.session_state.event_log.append({
-        "time": timestamp,
-        "type": event_type,
-        "event": message
+        "Time": timestamp,
+        "Type": event_type,
+        "Event": message
     })
 
-    # Keep last 30 events
+    # Keep latest 30 events
     if len(st.session_state.event_log) > 30:
         st.session_state.event_log = (
             st.session_state.event_log[-30:]
@@ -85,19 +85,32 @@ def get_expected_value(df, parameter):
     }
 
     if parameter == "temperature":
-        values = df[df["temperature"] < 40]["temperature"]
+
+        values = df[
+            (df["temperature"] > -10) &
+            (df["temperature"] < 45)
+        ]["temperature"]
 
     elif parameter == "humidity":
+
         values = df[
-            (df["humidity"] > 20) &
-            (df["humidity"] < 90)
+            (df["humidity"] > 10) &
+            (df["humidity"] < 95)
         ]["humidity"]
 
     elif parameter == "pressure":
-        values = df[df["pressure"] < 1050]["pressure"]
+
+        values = df[
+            (df["pressure"] > 940) &
+            (df["pressure"] < 1060)
+        ]["pressure"]
 
     else:
-        values = df[df["wind_speed"] < 20]["wind_speed"]
+
+        values = df[
+            (df["wind_speed"] >= 0) &
+            (df["wind_speed"] < 30)
+        ]["wind_speed"]
 
     if len(values) > 0:
         return values.mean()
@@ -105,32 +118,20 @@ def get_expected_value(df, parameter):
     return defaults[parameter]
 
 
-def calculate_health(df):
+def calculate_system_health(fault_type):
 
-    if len(df) == 0:
+    if fault_type is None:
         return 100
 
-    latest = df.iloc[-1]
+    return 75
 
-    score = 100
 
-    # Temperature
-    if latest["temperature"] > 40 or latest["temperature"] < -20:
-        score -= 25
+def get_sensor_status(parameter, fault_type):
 
-    # Humidity
-    if latest["humidity"] < 20 or latest["humidity"] > 90:
-        score -= 25
+    if fault_type == parameter:
+        return "🔴 FAULT"
 
-    # Pressure
-    if latest["pressure"] > 1050 or latest["pressure"] < 950:
-        score -= 25
-
-    # Wind
-    if latest["wind_speed"] > 20:
-        score -= 25
-
-    return max(0, score)
+    return "🟢 NORMAL"
 
 
 # ============================================================
@@ -148,6 +149,10 @@ st.sidebar.divider()
 st.sidebar.subheader("🚨 Fault Injection")
 
 
+# ------------------------------------------------------------
+# Temperature fault
+# ------------------------------------------------------------
+
 if st.sidebar.button(
     "🌡️ Temperature Fault",
     use_container_width=True
@@ -156,6 +161,7 @@ if st.sidebar.button(
     st.session_state.fault_type = "temperature"
 
     if st.session_state.previous_fault != "temperature":
+
         add_event(
             "Temperature sensor fault injected",
             "ALERT"
@@ -163,6 +169,10 @@ if st.sidebar.button(
 
     st.session_state.previous_fault = "temperature"
 
+
+# ------------------------------------------------------------
+# Humidity fault
+# ------------------------------------------------------------
 
 if st.sidebar.button(
     "💧 Humidity Fault",
@@ -172,6 +182,7 @@ if st.sidebar.button(
     st.session_state.fault_type = "humidity"
 
     if st.session_state.previous_fault != "humidity":
+
         add_event(
             "Humidity sensor fault injected",
             "ALERT"
@@ -179,6 +190,10 @@ if st.sidebar.button(
 
     st.session_state.previous_fault = "humidity"
 
+
+# ------------------------------------------------------------
+# Pressure fault
+# ------------------------------------------------------------
 
 if st.sidebar.button(
     "🌍 Pressure Fault",
@@ -188,6 +203,7 @@ if st.sidebar.button(
     st.session_state.fault_type = "pressure"
 
     if st.session_state.previous_fault != "pressure":
+
         add_event(
             "Pressure sensor fault injected",
             "ALERT"
@@ -195,6 +211,10 @@ if st.sidebar.button(
 
     st.session_state.previous_fault = "pressure"
 
+
+# ------------------------------------------------------------
+# Wind fault
+# ------------------------------------------------------------
 
 if st.sidebar.button(
     "💨 Wind Speed Fault",
@@ -204,6 +224,7 @@ if st.sidebar.button(
     st.session_state.fault_type = "wind_speed"
 
     if st.session_state.previous_fault != "wind_speed":
+
         add_event(
             "Wind speed sensor fault injected",
             "ALERT"
@@ -212,32 +233,44 @@ if st.sidebar.button(
     st.session_state.previous_fault = "wind_speed"
 
 
+# ------------------------------------------------------------
+# Reset
+# ------------------------------------------------------------
+
 if st.sidebar.button(
     "🔄 RESET TO NORMAL",
     use_container_width=True
 ):
 
-    st.session_state.fault_type = None
+    if st.session_state.fault_type is not None:
 
-    if st.session_state.previous_fault is not None:
         add_event(
             "All sensors returned to normal",
             "NORMAL"
         )
 
+    st.session_state.fault_type = None
     st.session_state.previous_fault = None
 
 
 st.sidebar.divider()
 
 st.sidebar.info(
-    "💡 Demo tip: Start with normal readings, "
-    "then inject a fault and show the AI explanation."
+    """
+💡 **Demo sequence**
+
+1. Start with normal readings
+2. Show 🟢 NORMAL
+3. Click a fault button
+4. Show 🚨 AI detection
+5. Explain expected value
+6. Press RESET TO NORMAL
+"""
 )
 
 
 # ============================================================
-# GENERATE REAL-TIME SENSOR DATA
+# GENERATE NORMAL SENSOR DATA
 # ============================================================
 
 st.session_state.reading_number += 1
@@ -245,33 +278,39 @@ st.session_state.reading_number += 1
 reading_number = st.session_state.reading_number
 
 
-# Normal weather behaviour
+# Create realistic smooth weather behaviour
 
 temperature = (
-    28
-    + np.sin(reading_number / 20) * 2
-    + np.random.normal(0, 0.4)
+    29
+    + np.sin(reading_number / 15) * 1.5
+    + np.random.normal(0, 0.25)
 )
+
 
 humidity = (
     65
-    - np.sin(reading_number / 20) * 5
-    + np.random.normal(0, 1)
+    - np.sin(reading_number / 15) * 4
+    + np.random.normal(0, 0.7)
 )
+
 
 pressure = (
     1012
-    + np.random.normal(0, 0.8)
+    + np.sin(reading_number / 30) * 2
+    + np.random.normal(0, 0.5)
 )
+
 
 wind_speed = max(
     0,
-    5 + np.random.normal(0, 1)
+    5
+    + np.sin(reading_number / 10)
+    + np.random.normal(0, 0.5)
 )
 
 
 # ============================================================
-# APPLY FAULT
+# APPLY SIMULATED SENSOR FAULT
 # ============================================================
 
 if st.session_state.fault_type == "temperature":
@@ -295,17 +334,36 @@ elif st.session_state.fault_type == "wind_speed":
 
 
 # ============================================================
-# CREATE SENSOR READING
+# CREATE CURRENT READING
 # ============================================================
 
 new_reading = {
+
     "reading": reading_number,
+
     "timestamp": pd.Timestamp.now(),
+
     "station_id": "AWS-01",
-    "temperature": round(temperature, 2),
-    "humidity": round(humidity, 2),
-    "pressure": round(pressure, 2),
-    "wind_speed": round(wind_speed, 2)
+
+    "temperature": round(
+        temperature,
+        2
+    ),
+
+    "humidity": round(
+        humidity,
+        2
+    ),
+
+    "pressure": round(
+        pressure,
+        2
+    ),
+
+    "wind_speed": round(
+        wind_speed,
+        2
+    )
 }
 
 
@@ -314,7 +372,7 @@ st.session_state.sensor_data.append(
 )
 
 
-# Keep last 100 observations
+# Keep latest 100 readings
 
 if len(st.session_state.sensor_data) > 100:
 
@@ -335,29 +393,30 @@ df = pd.DataFrame(
 st.title("🌦️ SKYGUARD AI")
 
 st.markdown(
-    "**Intelligent Automatic Weather Station Monitoring & "
-    "Sensor Anomaly Detection**"
+    """
+**Intelligent Automatic Weather Station Monitoring & Sensor Anomaly Detection**
+"""
 )
 
 
-header_col1, header_col2, header_col3 = st.columns(3)
+header1, header2, header3 = st.columns(3)
 
 
-with header_col1:
+with header1:
 
     st.markdown(
         "**📡 Station:** `AWS-01`"
     )
 
 
-with header_col2:
+with header2:
 
     st.markdown(
         "**🌐 Connection:** 🟢 ONLINE"
     )
 
 
-with header_col3:
+with header3:
 
     current_time = pd.Timestamp.now().strftime(
         "%H:%M:%S"
@@ -369,7 +428,8 @@ with header_col3:
 
 
 # ============================================================
-# AI MODEL — CLEAN BASELINE
+# AI MODEL
+# CLEAN NORMAL BASELINE
 # ============================================================
 
 sensor_columns = [
@@ -381,57 +441,97 @@ sensor_columns = [
 
 
 # ------------------------------------------------------------
-# Create a clean NORMAL reference dataset
+# Generate clean NORMAL training data
 # ------------------------------------------------------------
 
 np.random.seed(42)
 
-baseline_size = 300
+baseline_size = 500
+
 
 baseline = pd.DataFrame({
 
     "temperature":
         29
-        + np.random.normal(0, 1.2, baseline_size),
+        + np.random.normal(
+            0,
+            1.2,
+            baseline_size
+        ),
 
     "humidity":
         65
-        + np.random.normal(0, 4, baseline_size),
+        + np.random.normal(
+            0,
+            4,
+            baseline_size
+        ),
 
     "pressure":
         1012
-        + np.random.normal(0, 2, baseline_size),
+        + np.random.normal(
+            0,
+            2,
+            baseline_size
+        ),
 
     "wind_speed":
         5
-        + np.random.normal(0, 1.2, baseline_size)
+        + np.random.normal(
+            0,
+            1.2,
+            baseline_size
+        )
 })
 
 
-# Keep values physically reasonable
+# Keep baseline physically reasonable
 
-baseline["humidity"] = baseline["humidity"].clip(30, 85)
+baseline["temperature"] = baseline[
+    "temperature"
+].clip(
+    -5,
+    45
+)
 
-baseline["pressure"] = baseline["pressure"].clip(
+
+baseline["humidity"] = baseline[
+    "humidity"
+].clip(
+    30,
+    85
+)
+
+
+baseline["pressure"] = baseline[
+    "pressure"
+].clip(
     995,
     1030
 )
 
-baseline["wind_speed"] = baseline["wind_speed"].clip(
+
+baseline["wind_speed"] = baseline[
+    "wind_speed"
+].clip(
     0,
     15
 )
 
 
 # ------------------------------------------------------------
-# Train AI only on NORMAL data
+# Train Isolation Forest
 # ------------------------------------------------------------
 
 model = IsolationForest(
+
     n_estimators=200,
+
     contamination="auto",
+
     random_state=42
 )
+
 
 model.fit(
     baseline[sensor_columns]
@@ -439,16 +539,18 @@ model.fit(
 
 
 # ------------------------------------------------------------
-# Analyze current readings
+# AI prediction
 # ------------------------------------------------------------
 
 df["prediction"] = model.predict(
     df[sensor_columns]
 )
 
+
 df["anomaly_score"] = model.decision_function(
     df[sensor_columns]
 )
+
 
 df["anomaly"] = (
     df["prediction"] == -1
@@ -456,25 +558,29 @@ df["anomaly"] = (
 
 
 # ============================================================
-# PHYSICAL / ENGINEERING LIMIT CHECK
+# ENGINEERING SANITY CHECK
 # ============================================================
 
 latest_index = df.index[-1]
+
 
 latest_temperature = df.loc[
     latest_index,
     "temperature"
 ]
 
+
 latest_humidity = df.loc[
     latest_index,
     "humidity"
 ]
 
+
 latest_pressure = df.loc[
     latest_index,
     "pressure"
 ]
+
 
 latest_wind = df.loc[
     latest_index,
@@ -485,61 +591,77 @@ latest_wind = df.loc[
 engineering_fault = False
 
 
-# Temperature
+# Temperature limits
+
 if (
     latest_temperature > 45
     or latest_temperature < -10
 ):
+
     engineering_fault = True
 
 
-# Humidity
+# Humidity limits
+
 if (
     latest_humidity < 10
     or latest_humidity > 95
 ):
+
     engineering_fault = True
 
 
-# Pressure
+# Pressure limits
+
 if (
     latest_pressure > 1060
     or latest_pressure < 940
 ):
+
     engineering_fault = True
 
 
-# Wind speed
+# Wind limits
+
 if latest_wind > 30:
+
     engineering_fault = True
 
 
 # ============================================================
-# FINAL AI DECISION
+# FINAL DECISION
 # ============================================================
 
-if engineering_fault:
+# For this prototype we deliberately make the
+# fault-injection controls deterministic.
+
+if st.session_state.fault_type is not None:
 
     df.loc[
         latest_index,
         "anomaly"
     ] = True
 
-elif st.session_state.fault_type is not None:
 
-    # Deterministic demo fault
+elif engineering_fault:
+
     df.loc[
         latest_index,
         "anomaly"
     ] = True
+
 
 else:
 
-    # Normal operation
+    # Normal operating condition
+    # is considered normal.
+
     df.loc[
         latest_index,
         "anomaly"
     ] = False
+
+
 # ============================================================
 # LATEST READING
 # ============================================================
@@ -551,7 +673,9 @@ latest = df.iloc[-1]
 # SYSTEM HEALTH
 # ============================================================
 
-system_health = calculate_health(df)
+system_health = calculate_system_health(
+    st.session_state.fault_type
+)
 
 
 # ============================================================
@@ -560,10 +684,11 @@ system_health = calculate_health(df)
 
 st.divider()
 
-status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+
+status1, status2, status3, status4 = st.columns(4)
 
 
-with status_col1:
+with status1:
 
     st.metric(
         "📊 System Health",
@@ -571,7 +696,7 @@ with status_col1:
     )
 
 
-with status_col2:
+with status2:
 
     st.metric(
         "📡 Total Readings",
@@ -579,19 +704,23 @@ with status_col2:
     )
 
 
-with status_col3:
+with status3:
 
-    anomaly_count = int(
-        df["anomaly"].sum()
+    # CURRENT anomaly, not historical count
+
+    current_anomaly = int(
+        bool(
+            latest["anomaly"]
+        )
     )
 
     st.metric(
-        "🚨 Anomalies",
-        anomaly_count
+        "🚨 Current Anomaly",
+        current_anomaly
     )
 
 
-with status_col4:
+with status4:
 
     st.metric(
         "🤖 AI Engine",
@@ -600,16 +729,18 @@ with status_col4:
 
 
 # ============================================================
-# SENSOR READINGS
+# LIVE SENSOR READINGS
 # ============================================================
 
-st.subheader("📡 Live AWS Sensor Readings")
+st.subheader(
+    "📡 Live AWS Sensor Readings"
+)
 
 
-col1, col2, col3, col4 = st.columns(4)
+sensor1, sensor2, sensor3, sensor4 = st.columns(4)
 
 
-with col1:
+with sensor1:
 
     st.metric(
         "🌡️ Temperature",
@@ -617,7 +748,7 @@ with col1:
     )
 
 
-with col2:
+with sensor2:
 
     st.metric(
         "💧 Humidity",
@@ -625,7 +756,7 @@ with col2:
     )
 
 
-with col3:
+with sensor3:
 
     st.metric(
         "🌍 Pressure",
@@ -633,7 +764,7 @@ with col3:
     )
 
 
-with col4:
+with sensor4:
 
     st.metric(
         "💨 Wind Speed",
@@ -647,77 +778,118 @@ with col4:
 
 st.divider()
 
-st.subheader("🩺 Sensor Health")
+st.subheader(
+    "🩺 Sensor Health"
+)
 
 
-def sensor_status(parameter):
-
-    if st.session_state.fault_type == parameter:
-        return "🔴 FAULT"
-
-    return "🟢 NORMAL"
+health1, health2, health3, health4 = st.columns(4)
 
 
-health_col1, health_col2, health_col3, health_col4 = st.columns(4)
+with health1:
 
-
-with health_col1:
+    status = get_sensor_status(
+        "temperature",
+        st.session_state.fault_type
+    )
 
     st.info(
-        f"🌡️ **Temperature**\n\n"
-        f"{sensor_status('temperature')}"
+        f"""
+🌡️ **Temperature**
+
+{status}
+"""
     )
 
 
-with health_col2:
+with health2:
+
+    status = get_sensor_status(
+        "humidity",
+        st.session_state.fault_type
+    )
 
     st.info(
-        f"💧 **Humidity**\n\n"
-        f"{sensor_status('humidity')}"
+        f"""
+💧 **Humidity**
+
+{status}
+"""
     )
 
 
-with health_col3:
+with health3:
+
+    status = get_sensor_status(
+        "pressure",
+        st.session_state.fault_type
+    )
 
     st.info(
-        f"🌍 **Pressure**\n\n"
-        f"{sensor_status('pressure')}"
+        f"""
+🌍 **Pressure**
+
+{status}
+"""
     )
 
 
-with health_col4:
+with health4:
+
+    status = get_sensor_status(
+        "wind_speed",
+        st.session_state.fault_type
+    )
 
     st.info(
-        f"💨 **Wind Speed**\n\n"
-        f"{sensor_status('wind_speed')}"
+        f"""
+💨 **Wind Speed**
+
+{status}
+"""
     )
 
 
 # ============================================================
-# STATION STATUS
+# SYSTEM STATUS
 # ============================================================
 
 st.divider()
 
+
 if st.session_state.fault_type is None:
 
     st.success(
-        "🟢 AWS-01 OPERATING NORMALLY — "
-        "No active simulated sensor fault."
+        """
+🟢 **AWS-01 OPERATING NORMALLY**
+
+All monitored parameters are within expected operating behaviour.
+"""
     )
 
 else:
 
     fault_names = {
-        "temperature": "TEMPERATURE",
-        "humidity": "HUMIDITY",
-        "pressure": "PRESSURE",
-        "wind_speed": "WIND SPEED"
+
+        "temperature":
+            "TEMPERATURE",
+
+        "humidity":
+            "HUMIDITY",
+
+        "pressure":
+            "PRESSURE",
+
+        "wind_speed":
+            "WIND SPEED"
     }
 
+
     st.error(
-        f"🚨 {fault_names[st.session_state.fault_type]} "
-        "SENSOR FAULT ACTIVE"
+        f"""
+🚨 **{fault_names[st.session_state.fault_type]}
+SENSOR FAULT ACTIVE**
+"""
     )
 
 
@@ -734,41 +906,98 @@ if st.session_state.fault_type is not None:
     )
 
 
-    fault_type = st.session_state.fault_type
+    fault_type = (
+        st.session_state.fault_type
+    )
 
+
+    # --------------------------------------------------------
+    # Determine parameter
+    # --------------------------------------------------------
 
     if fault_type == "temperature":
 
         parameter = "Temperature"
-        current_value = latest["temperature"]
+
+        current_value = latest[
+            "temperature"
+        ]
+
         unit = "°C"
 
 
     elif fault_type == "humidity":
 
         parameter = "Humidity"
-        current_value = latest["humidity"]
+
+        current_value = latest[
+            "humidity"
+        ]
+
         unit = "%"
 
 
     elif fault_type == "pressure":
 
         parameter = "Pressure"
-        current_value = latest["pressure"]
+
+        current_value = latest[
+            "pressure"
+        ]
+
         unit = "hPa"
 
 
     else:
 
         parameter = "Wind Speed"
-        current_value = latest["wind_speed"]
+
+        current_value = latest[
+            "wind_speed"
+        ]
+
         unit = "m/s"
 
+
+    # --------------------------------------------------------
+    # Expected value
+    # --------------------------------------------------------
 
     expected_value = get_expected_value(
         df,
         fault_type
     )
+
+
+    # For fault mode, calculate expected value
+    # from the clean baseline instead of faulty value.
+
+    if fault_type == "temperature":
+
+        expected_value = baseline[
+            "temperature"
+        ].mean()
+
+
+    elif fault_type == "humidity":
+
+        expected_value = baseline[
+            "humidity"
+        ].mean()
+
+
+    elif fault_type == "pressure":
+
+        expected_value = baseline[
+            "pressure"
+        ].mean()
+
+
+    elif fault_type == "wind_speed":
+
+        expected_value = baseline[
+            "wind_speed"
+        ].mean()
 
 
     deviation = abs(
@@ -778,30 +1007,30 @@ if st.session_state.fault_type is not None:
 
 
     # --------------------------------------------------------
-    # Derived risk indicator
+    # Derived confidence indicator
     # --------------------------------------------------------
 
-    risk_confidence = min(
+    confidence = min(
         99,
         max(
-            85,
+            90,
             int(
-                85 +
-                min(
+                90
+                + min(
                     deviation,
-                    14
+                    9
                 )
             )
         )
     )
 
 
-    analysis_col1, analysis_col2, analysis_col3, analysis_col4 = (
+    analysis1, analysis2, analysis3, analysis4 = (
         st.columns(4)
     )
 
 
-    with analysis_col1:
+    with analysis1:
 
         st.metric(
             "Faulty Parameter",
@@ -809,7 +1038,7 @@ if st.session_state.fault_type is not None:
         )
 
 
-    with analysis_col2:
+    with analysis2:
 
         st.metric(
             "Current Value",
@@ -817,7 +1046,7 @@ if st.session_state.fault_type is not None:
         )
 
 
-    with analysis_col3:
+    with analysis3:
 
         st.metric(
             "Expected Value",
@@ -825,7 +1054,7 @@ if st.session_state.fault_type is not None:
         )
 
 
-    with analysis_col4:
+    with analysis4:
 
         st.metric(
             "Severity",
@@ -834,21 +1063,27 @@ if st.session_state.fault_type is not None:
 
 
     # --------------------------------------------------------
-    # AI confidence
+    # Confidence
     # --------------------------------------------------------
 
     st.markdown(
-        f"### 🤖 AI Detection Confidence — {risk_confidence}%"
+        f"""
+### 🤖 AI Detection Confidence — {confidence}%
+"""
     )
+
 
     st.progress(
-        risk_confidence / 100
+        confidence / 100
     )
 
+
     st.caption(
-        "This is a demo risk/confidence indicator derived "
-        "from the magnitude of the detected deviation; "
-        "it is not a calibrated probability."
+        """
+This is a prototype risk/confidence indicator derived from
+the magnitude of the detected deviation. It is not a
+calibrated probability.
+"""
     )
 
 
@@ -870,26 +1105,30 @@ if st.session_state.fault_type is not None:
 
 **Possible cause:** {parameter} sensor malfunction.
 
-The observation is significantly different from the
-recent normal sensor behaviour and has been flagged
-for investigation.
+The current observation differs significantly from the
+normal sensor behaviour learned by the SKYGUARD monitoring
+system.
 """
     )
 
 
     st.write(
-        f"**Isolation Forest Anomaly Score:** "
-        f"`{latest['anomaly_score']:.4f}`"
+        f"""
+**Isolation Forest Anomaly Score:**
+`{latest['anomaly_score']:.4f}`
+"""
     )
 
 
 # ============================================================
-# LIVE TEMPERATURE GRAPH
+# TEMPERATURE GRAPH
 # ============================================================
 
 st.divider()
 
-st.subheader("🌡️ Temperature Monitoring")
+st.subheader(
+    "🌡️ Temperature Monitoring"
+)
 
 
 temperature_fig = px.line(
@@ -900,20 +1139,22 @@ temperature_fig = px.line(
 )
 
 
-temperature_anomalies = df[
-    df["anomaly"]
-]
+# Only highlight the CURRENT anomaly
 
-
-if len(temperature_anomalies) > 0:
+if bool(latest["anomaly"]):
 
     temperature_fig.add_scatter(
-        x=temperature_anomalies["timestamp"],
-        y=temperature_anomalies["temperature"],
+
+        x=[latest["timestamp"]],
+
+        y=[latest["temperature"]],
+
         mode="markers",
-        name="🚨 AI Anomaly",
+
+        name="🚨 Current Anomaly",
+
         marker=dict(
-            size=12,
+            size=14,
             symbol="x"
         )
     )
@@ -926,13 +1167,13 @@ st.plotly_chart(
 
 
 # ============================================================
-# OTHER SENSOR GRAPHS
+# HUMIDITY GRAPH
 # ============================================================
 
-graph_col1, graph_col2 = st.columns(2)
+graph1, graph2 = st.columns(2)
 
 
-with graph_col1:
+with graph1:
 
     humidity_fig = px.line(
         df,
@@ -947,7 +1188,11 @@ with graph_col1:
     )
 
 
-with graph_col2:
+# ============================================================
+# PRESSURE GRAPH
+# ============================================================
+
+with graph2:
 
     pressure_fig = px.line(
         df,
@@ -961,6 +1206,10 @@ with graph_col2:
         use_container_width=True
     )
 
+
+# ============================================================
+# WIND GRAPH
+# ============================================================
 
 wind_fig = px.line(
     df,
@@ -982,7 +1231,9 @@ st.plotly_chart(
 
 st.divider()
 
-st.subheader("📋 Event Log")
+st.subheader(
+    "📋 Event Log"
+)
 
 
 if len(st.session_state.event_log) > 0:
@@ -990,6 +1241,7 @@ if len(st.session_state.event_log) > 0:
     event_df = pd.DataFrame(
         st.session_state.event_log[::-1]
     )
+
 
     st.dataframe(
         event_df,
@@ -1005,34 +1257,43 @@ else:
 
 
 # ============================================================
-# ANOMALY HISTORY
+# CURRENT ANOMALY HISTORY
 # ============================================================
 
 st.divider()
 
-st.subheader("🚨 Anomaly History")
+st.subheader(
+    "🚨 Current Anomaly Details"
+)
 
 
-anomaly_history = df[
-    df["anomaly"]
-][
-    [
-        "reading",
-        "timestamp",
-        "station_id",
-        "temperature",
-        "humidity",
-        "pressure",
-        "wind_speed",
-        "anomaly_score"
-    ]
-]
+if bool(latest["anomaly"]):
 
+    anomaly_details = pd.DataFrame({
 
-if len(anomaly_history) > 0:
+        "Parameter": [parameter],
+
+        "Current Value": [
+            f"{current_value:.2f} {unit}"
+        ],
+
+        "Expected Value": [
+            f"{expected_value:.2f} {unit}"
+        ],
+
+        "Deviation": [
+            f"{deviation:.2f} {unit}"
+        ],
+
+        "Status": [
+            "🚨 ANOMALY"
+        ]
+
+    })
+
 
     st.dataframe(
-        anomaly_history.tail(20),
+        anomaly_details,
         use_container_width=True,
         hide_index=True
     )
@@ -1040,15 +1301,16 @@ if len(anomaly_history) > 0:
 else:
 
     st.success(
-        "🟢 No anomalies detected."
+        "🟢 No current anomaly detected."
     )
 
 
 # ============================================================
-# LIVE DATA
+# RAW DATA
 # ============================================================
 
 st.divider()
+
 
 with st.expander(
     "📊 View Raw Live Sensor Data"
@@ -1074,36 +1336,46 @@ st.subheader(
 
 st.code(
 """
-Automatic Weather Station
-          │
-          ▼
-   Sensor Observations
-          │
-          ▼
-    Data Processing
-          │
-          ▼
-    Isolation Forest
-          │
-          ▼
-   Anomaly Detection
-          │
-     ┌────┴────┐
-     ▼         ▼
-  NORMAL    ANOMALY
-    🟢         🚨
-                │
-                ▼
-        Fault Identification
-                │
-                ▼
-        Expected Value
-                │
-                ▼
-       AI Explanation
-                │
-                ▼
-          Alert / Log
+                 WEATHER STATION
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+   Temperature     Humidity       Pressure
+        │              │              │
+        └──────────────┼──────────────┘
+                       │
+                  Wind Speed
+                       │
+                       ▼
+                     ESP32
+                       │
+                     Wi-Fi
+                       │
+                       ▼
+                SKYGUARD AI
+                       │
+                       ▼
+              Data Processing
+                       │
+                       ▼
+              Isolation Forest
+                       │
+              ┌────────┴────────┐
+              │                 │
+           NORMAL            ANOMALY
+             🟢                 🚨
+                               │
+                               ▼
+                       Fault Diagnosis
+                               │
+                               ▼
+                        Expected Value
+                               │
+                               ▼
+                         Explanation
+                               │
+                               ▼
+                      Dashboard / Alert
 """,
 language="text"
 )
@@ -1116,6 +1388,8 @@ language="text"
 st.divider()
 
 st.caption(
-    "SKYGUARD AI • Intelligent Automatic Weather Station "
-    "Anomaly Detection • SIH Prototype"
+    """
+SKYGUARD AI • Intelligent Automatic Weather Station
+Anomaly Detection • SIH Prototype
+"""
 )
