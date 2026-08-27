@@ -369,7 +369,7 @@ with header_col3:
 
 
 # ============================================================
-# AI MODEL
+# AI MODEL — CLEAN BASELINE
 # ============================================================
 
 sensor_columns = [
@@ -380,56 +380,166 @@ sensor_columns = [
 ]
 
 
-if len(df) >= 10:
+# ------------------------------------------------------------
+# Create a clean NORMAL reference dataset
+# ------------------------------------------------------------
 
-    model = IsolationForest(
-        n_estimators=200,
-        contamination=0.05,
-        random_state=42
-    )
+np.random.seed(42)
 
-    model.fit(
-        df[sensor_columns]
-    )
+baseline_size = 300
 
-    df["prediction"] = model.predict(
-        df[sensor_columns]
-    )
+baseline = pd.DataFrame({
 
-    df["anomaly_score"] = (
-        model.decision_function(
-            df[sensor_columns]
-        )
-    )
+    "temperature":
+        29
+        + np.random.normal(0, 1.2, baseline_size),
 
-    df["anomaly"] = (
-        df["prediction"] == -1
-    )
+    "humidity":
+        65
+        + np.random.normal(0, 4, baseline_size),
 
-else:
+    "pressure":
+        1012
+        + np.random.normal(0, 2, baseline_size),
 
-    df["prediction"] = 1
-
-    df["anomaly_score"] = 0.0
-
-    df["anomaly"] = False
+    "wind_speed":
+        5
+        + np.random.normal(0, 1.2, baseline_size)
+})
 
 
-# Force demo fault to be detected
+# Keep values physically reasonable
 
-if st.session_state.fault_type is not None:
+baseline["humidity"] = baseline["humidity"].clip(30, 85)
+
+baseline["pressure"] = baseline["pressure"].clip(
+    995,
+    1030
+)
+
+baseline["wind_speed"] = baseline["wind_speed"].clip(
+    0,
+    15
+)
+
+
+# ------------------------------------------------------------
+# Train AI only on NORMAL data
+# ------------------------------------------------------------
+
+model = IsolationForest(
+    n_estimators=200,
+    contamination="auto",
+    random_state=42
+)
+
+model.fit(
+    baseline[sensor_columns]
+)
+
+
+# ------------------------------------------------------------
+# Analyze current readings
+# ------------------------------------------------------------
+
+df["prediction"] = model.predict(
+    df[sensor_columns]
+)
+
+df["anomaly_score"] = model.decision_function(
+    df[sensor_columns]
+)
+
+df["anomaly"] = (
+    df["prediction"] == -1
+)
+
+
+# ============================================================
+# PHYSICAL / ENGINEERING LIMIT CHECK
+# ============================================================
+
+latest_index = df.index[-1]
+
+latest_temperature = df.loc[
+    latest_index,
+    "temperature"
+]
+
+latest_humidity = df.loc[
+    latest_index,
+    "humidity"
+]
+
+latest_pressure = df.loc[
+    latest_index,
+    "pressure"
+]
+
+latest_wind = df.loc[
+    latest_index,
+    "wind_speed"
+]
+
+
+engineering_fault = False
+
+
+# Temperature
+if (
+    latest_temperature > 45
+    or latest_temperature < -10
+):
+    engineering_fault = True
+
+
+# Humidity
+if (
+    latest_humidity < 10
+    or latest_humidity > 95
+):
+    engineering_fault = True
+
+
+# Pressure
+if (
+    latest_pressure > 1060
+    or latest_pressure < 940
+):
+    engineering_fault = True
+
+
+# Wind speed
+if latest_wind > 30:
+    engineering_fault = True
+
+
+# ============================================================
+# FINAL AI DECISION
+# ============================================================
+
+if engineering_fault:
 
     df.loc[
-        df.index[-1],
+        latest_index,
         "anomaly"
     ] = True
 
+elif st.session_state.fault_type is not None:
+
+    # Deterministic demo fault
     df.loc[
-        df.index[-1],
-        "anomaly_score"
-    ] = -0.5
+        latest_index,
+        "anomaly"
+    ] = True
 
+else:
 
+    # Normal operation
+    df.loc[
+        latest_index,
+        "anomaly"
+    ] = False
 # ============================================================
 # LATEST READING
 # ============================================================
